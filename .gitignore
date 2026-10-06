@@ -1,1 +1,7 @@
 walkthrough-main-l37-59.html
+
+# Build artifacts
+main
+*.o
+*.out
+
