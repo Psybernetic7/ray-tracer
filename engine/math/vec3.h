@@ -1,6 +1,10 @@
 #ifndef VEC3_H
 #define VEC3_H
 
+#include "math/rng.h"
+
+#include <cmath>
+#include <ostream>
 
 
 class vec3 {

@@ -1,7 +1,8 @@
 #ifndef MATERIAL_H
 #define MATERIAL_H
 
-#include "hittable.h"
+#include "rtheader.h"
+#include "geometry/hittable.h"
 
 class material {
   public:
