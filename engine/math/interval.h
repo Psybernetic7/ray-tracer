@@ -1,6 +1,8 @@
 #ifndef INTERVAL_H
 #define INTERVAL_H
 
+#include "math/constants.h"
+
 class interval {
   public:
     double min, max;
@@ -30,7 +32,7 @@ class interval {
     static const interval empty, universe;
 };
 
-const interval interval::empty    = interval(+infinity, -infinity);
-const interval interval::universe = interval(-infinity, +infinity);
+inline const interval interval::empty    = interval(+infinity, -infinity);
+inline const interval interval::universe = interval(-infinity, +infinity);
 
 #endif
