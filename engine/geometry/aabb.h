@@ -39,6 +39,18 @@ class aabb {
 
         for (int axis = 0; axis < 3; axis++) {
             const interval& ax = axis_interval(axis);
+
+            if (ray_dir[axis] == 0) {
+                // The ray never moves along this axis, so it is either inside the slab for its
+                // whole length or outside it for the whole length -- and the division below
+                // would be (0 * infinity) = NaN for a ray running exactly along a box face.
+                // Meshes hit that constantly: an axis-aligned ray aimed at a grid vertex sits
+                // exactly on the shared boundary of four cells' boxes.
+                if (ray_orig[axis] < ax.min || ray_orig[axis] > ax.max)
+                    return false;
+                continue;
+            }
+
             const double adinv = 1.0 / ray_dir[axis];
 
             auto t0 = (ax.min - ray_orig[axis]) * adinv;
@@ -64,6 +76,16 @@ class aabb {
             return x.size() > z.size() ? 0 : 2;
         else
             return y.size() > z.size() ? 1 : 2;
+    }
+
+    aabb padded(double delta) const {
+        // A box with no thickness on some axis makes the slab test compute inf*0 = NaN for a
+        // ray travelling inside that plane. Flat primitives (an axis-aligned triangle, a
+        // level patch of terrain) hit this, so they pad their boxes by a hair.
+        auto pad = [delta](const interval& i) {
+            return i.size() >= delta ? i : interval(i.min - delta/2, i.max + delta/2);
+        };
+        return aabb(pad(x), pad(y), pad(z));
     }
 
     point3 centroid() const {

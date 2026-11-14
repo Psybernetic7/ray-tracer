@@ -15,6 +15,7 @@ class hit_record {
     // the materials and outlives every render.
     const material* mat;
     double t;
+    double u = 0, v = 0;  // Surface coordinates at the hit point (barycentric on a triangle)
     bool front_face;
 
     void set_face_normal(const ray& r, const vec3& outward_normal) {
@@ -31,6 +32,15 @@ class hittable {
     virtual ~hittable() = default;
 
     virtual bool hit(const ray& r, interval ray_t, hit_record& rec) const = 0;
+
+    // Any-hit query: is anything in the way between ray_t.min and ray_t.max? Shadow rays only
+    // need a yes or no, so this is free to stop at the first blocker instead of searching for
+    // the nearest one, and it never touches a hit record. The default answers with hit(); the
+    // BVH overrides it to short-circuit, and M2's sun-hours maps lean on it heavily.
+    virtual bool occluded(const ray& r, interval ray_t) const {
+        hit_record rec;
+        return hit(r, ray_t, rec);
+    }
 
     virtual aabb bounding_box() const = 0;
 };

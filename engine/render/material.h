@@ -13,6 +13,17 @@ class material {
     ) const {
         return false;
     }
+
+    // Reports the diffuse albedo at a hit so the renderer can light the surface directly from
+    // the sun with a shadow ray, instead of waiting for a scattered ray to find it.
+    //
+    // Specular materials return false and keep the default. A mirror reflects a single
+    // direction, and the sun covers a single direction, so the chance that the two coincide is
+    // zero: there is nothing for a shadow ray to carry, and the reflection the camera actually
+    // sees comes from the scattered ray hitting the sun's disk in the sky.
+    virtual bool diffuse_albedo(const hit_record& rec, color& albedo) const {
+        return false;
+    }
 };
 
 class lambertian : public material {
@@ -29,6 +40,11 @@ class lambertian : public material {
 
         scattered = ray(rec.p, scatter_direction);
         attenuation = albedo;
+        return true;
+    }
+
+    bool diffuse_albedo(const hit_record& rec, color& out) const override {
+        out = albedo;
         return true;
     }
 

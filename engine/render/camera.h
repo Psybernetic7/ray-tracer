@@ -3,6 +3,7 @@
 
 #include "rtheader.h"
 #include "geometry/hittable.h"
+#include "lighting/sun.h"
 #include "render/material.h"
 
 class camera {
@@ -18,6 +19,9 @@ class camera {
 
     double defocus_angle = 0;  // Variation angle of rays through each pixel
     double focus_dist = 10;    // Distance from camera lookfrom point to plane of perfect focus
+
+    sun_light sun;  // Disabled by default, which leaves the sky as the only light
+    sky_light sky;
 
 
     // Must be called after changing any of the settings above, before rendering.
@@ -81,20 +85,42 @@ class camera {
 
         hit_record rec;
 
-        if (world.hit(r, interval(0.001, infinity), rec)) {
-            ray scattered;
-            color attenuation;
-            if (rec.mat->scatter(r, rec, attenuation, scattered))
-                return attenuation * ray_color(scattered, depth-1, world);
-            return color(0,0,0);
-        }
+        if (!world.hit(r, interval(0.001, infinity), rec))
+            return sky.radiance(unit_vector(r.direction()), sun);
 
-        vec3 unit_direction = unit_vector(r.direction());
-        auto a = 0.5*(unit_direction.y() + 1.0);
-        return (1.0-a)*color(1.0, 1.0, 1.0) + a*color(0.5, 0.7, 1.0);
+        color radiance = sunlight(rec, world);
+
+        ray scattered;
+        color attenuation;
+        if (rec.mat->scatter(r, rec, attenuation, scattered))
+            radiance += attenuation * ray_color(scattered, depth-1, world);
+
+        return radiance;
     }
 
   private:
+    // Light arriving directly from the sun at a diffuse hit, found by aiming one shadow ray at
+    // the sun's disk (next-event estimation) rather than waiting for the scattered path to
+    // stumble onto it. This is what gives the terrain its hard-edged shadows; the bounce ray
+    // handles sky fill and indirect light as before.
+    color sunlight(const hit_record& rec, const hittable& world) const {
+        color albedo;
+        if (!sun.enabled || !rec.mat->diffuse_albedo(rec, albedo))
+            return color(0,0,0);
+
+        const vec3 to_sun = sun.sample_direction();
+        const double cos_theta = dot(rec.normal, to_sun);
+        if (cos_theta <= 0)
+            return color(0,0,0);
+
+        if (world.occluded(ray(rec.p, to_sun), interval(0.001, infinity)))
+            return color(0,0,0);
+
+        // A Lambertian BRDF is albedo/pi, and the sun's irradiance falls off with the cosine
+        // of the angle between the surface normal and the sun.
+        return albedo * sun.intensity * (cos_theta / pi);
+    }
+
     int    image_height;   // Rendered image height
     point3 center;         // Camera center
     point3 pixel00_loc;    // Location of pixel 0, 0

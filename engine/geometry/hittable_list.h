@@ -37,6 +37,13 @@ class hittable_list : public hittable {
         return hit_anything;
     }
 
+    bool occluded(const ray& r, interval ray_t) const override {
+        for (const auto& object : objects)
+            if (object->occluded(r, ray_t))
+                return true;
+        return false;
+    }
+
     aabb bounding_box() const override { return bbox; }
 
   private:

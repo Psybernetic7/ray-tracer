@@ -45,7 +45,8 @@ if(BUILD_TESTING)
         tests/test_main.cc
         tests/test_math.cc
         tests/test_geometry.cc
-        tests/test_render.cc)
+        tests/test_render.cc
+        tests/test_terrain.cc)
     target_link_libraries(tests PRIVATE engine third_party)
     set_project_warnings(tests)
     if(MINGW)

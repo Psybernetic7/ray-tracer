@@ -3,10 +3,14 @@
 
 #include "rtheader.h"
 
+#include "geometry/heightfield.h"
 #include "geometry/hittable_list.h"
 #include "geometry/sphere.h"
+#include "geometry/triangle.h"
 #include "render/camera.h"
 #include "render/material.h"
+#include "terrain/terrain.h"
+#include "terrain/terrain_material.h"
 
 
 // The final scene from "Ray Tracing in One Weekend": a ground sphere, three large feature
@@ -65,6 +69,66 @@ inline hittable_list showcase_scene(camera& cam) {
 
     cam.defocus_angle = 0.6;
     cam.focus_dist    = 10.0;
+
+    return world;
+}
+
+
+// How the terrain scene is built and framed. The defaults are the README hero image.
+struct terrain_options {
+    int    resolution  = 512;   // Grid vertices per side; cost grows with the square of this
+    double size        = 10.0;  // World extent of the terrain in x and z
+    double peak_height = 3.2;   // World height of the tallest possible peak
+
+    bool   plain = true;        // A flat plain under the terrain, so it isn't a floating island
+
+    double sun_elevation = 19;  // Degrees above the horizon
+    double sun_azimuth   = 250; // Compass degrees: 0 north, 90 east
+
+    terrain_params terrain;
+};
+
+// A fractal mountain range under a low sun: fBm and ridged noise sampled into a heightfield,
+// meshed into the BVH, shaded by slope and height, and lit by one directional sun with
+// shadow rays.
+inline hittable_list terrain_scene(camera& cam, const terrain_options& opts) {
+    heightfield field = generate_heightfield(opts.resolution, opts.size, opts.peak_height,
+                                             opts.terrain);
+    const interval heights = field.height_range();
+
+    auto ground = make_shared<terrain_material>(heights);
+    hittable_list world = field.to_triangles(ground);
+
+    if (opts.plain) {
+        // Two big triangles just below the terrain's base. The terrain's edges already fade to
+        // that base height, so the mesh blends into the plain instead of ending in a cliff.
+        const double reach = 60 * opts.size;
+        const double y = heights.min - 0.002;
+        auto plain_material = make_shared<lambertian>(color(0.16, 0.15, 0.12));
+        point3 a(-reach, y, -reach), b(reach, y, -reach), c(reach, y, reach), d(-reach, y, reach);
+        world.add(make_shared<triangle>(a, c, b, plain_material));
+        world.add(make_shared<triangle>(a, d, c, plain_material));
+    }
+
+    cam.aspect_ratio = 16.0 / 9.0;
+    cam.max_depth    = 8;  // Shadow rays do the direct lighting, so paths can stay short
+
+    cam.vfov     = 34;
+    cam.lookfrom = point3(0.52*opts.size, 0.20*opts.size, 0.72*opts.size);
+    cam.lookat   = point3(0, heights.min + 0.50*heights.size(), 0);
+    cam.vup      = vec3(0,1,0);
+
+    cam.defocus_angle = 0;
+
+    cam.sun.enabled   = true;
+    cam.sun.direction = sun_light::direction_from_elevation_azimuth(opts.sun_elevation,
+                                                                    opts.sun_azimuth);
+    cam.sun.intensity = color(1.0, 0.87, 0.70) * 7.5;  // Warm, because the sun is low
+
+    cam.sky.horizon        = color(0.62, 0.68, 0.76);
+    cam.sky.zenith         = color(0.16, 0.33, 0.72);
+    cam.sky.glow_strength  = 0.9;
+    cam.sky.glow_sharpness = 14;
 
     return world;
 }

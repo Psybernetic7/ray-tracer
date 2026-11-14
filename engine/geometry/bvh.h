@@ -64,6 +64,15 @@ class bvh_node : public hittable {
         return hit_left || hit_right;
     }
 
+    bool occluded(const ray& r, interval ray_t) const override {
+        if (!bbox.hit(r, ray_t))
+            return false;
+
+        // Unlike hit(), this doesn't have to visit the right subtree once the left one found a
+        // blocker, and it never shrinks the t-range: || stops at the first hit anywhere.
+        return left->occluded(r, ray_t) || right->occluded(r, ray_t);
+    }
+
     aabb bounding_box() const override { return bbox; }
 
   private:
