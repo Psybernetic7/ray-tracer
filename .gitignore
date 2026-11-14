@@ -10,9 +10,9 @@ main
 # Claude Code
 .claude/
 
-# Rendered output: anything rt-cli writes to the repo root. image.png is the tracked sphere
-# render, and reference renders live in docs/, which these patterns don't touch.
+# Rendered output: anything rt-cli writes to the repo root, and analysis CSVs anywhere.
+# image.png is the tracked sphere render; reference images in docs/ stay tracked.
 /*.png
 !/image.png
 /*.ppm
-/*.csv
+*.csv

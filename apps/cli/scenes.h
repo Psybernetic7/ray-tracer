@@ -88,17 +88,34 @@ struct terrain_options {
     terrain_params terrain;
 };
 
-// A fractal mountain range under a low sun: fBm and ridged noise sampled into a heightfield,
-// meshed into the BVH, shaded by slope and height, and lit by one directional sun with
-// shadow rays.
-inline hittable_list terrain_scene(camera& cam, const terrain_options& opts) {
+// The terrain on its own: the height grid, its mesh, and the material that shades it.
+struct terrain_model {
+    heightfield field;
+    interval heights;
+    shared_ptr<terrain_material> material;
+    hittable_list triangles;  // The mesh, one entry per triangle
+};
+
+// Samples the noise into a heightfield and meshes it.
+inline terrain_model build_terrain(const terrain_options& opts) {
     heightfield field = generate_heightfield(opts.resolution, opts.size, opts.peak_height,
                                              opts.terrain);
     const interval heights = field.height_range();
+    auto material = make_shared<terrain_material>(heights);
+    hittable_list triangles = field.to_triangles(material);
+    return terrain_model{std::move(field), heights, material, std::move(triangles)};
+}
 
-    auto ground = make_shared<terrain_material>(heights);
-    hittable_list world = field.to_triangles(ground);
+// Which way the camera looks at the terrain.
+enum class terrain_view {
+    hero,      // Low and close, peaks against the sky: the README image
+    overview,  // High and further back, so analysis overlays can be read across the whole field
+};
 
+// Puts the terrain on its plain and sets up the camera, sun and sky around it. `world` holds the
+// terrain already, as loose triangles or as a BVH built over them.
+inline void frame_terrain(camera& cam, const terrain_options& opts, const interval& heights,
+                          hittable_list& world, terrain_view view = terrain_view::hero) {
     if (opts.plain) {
         // Two big triangles just below the terrain's base. The terrain's edges already fade to
         // that base height, so the mesh blends into the plain instead of ending in a cliff.
@@ -113,10 +130,16 @@ inline hittable_list terrain_scene(camera& cam, const terrain_options& opts) {
     cam.aspect_ratio = 16.0 / 9.0;
     cam.max_depth    = 8;  // Shadow rays do the direct lighting, so paths can stay short
 
-    cam.vfov     = 34;
-    cam.lookfrom = point3(0.52*opts.size, 0.20*opts.size, 0.72*opts.size);
-    cam.lookat   = point3(0, heights.min + 0.50*heights.size(), 0);
-    cam.vup      = vec3(0,1,0);
+    if (view == terrain_view::hero) {
+        cam.vfov     = 34;
+        cam.lookfrom = point3(0.52*opts.size, 0.20*opts.size, 0.72*opts.size);
+        cam.lookat   = point3(0, heights.min + 0.50*heights.size(), 0);
+    } else {
+        cam.vfov     = 38;
+        cam.lookfrom = point3(0.55*opts.size, 0.80*opts.size, 1.05*opts.size);
+        cam.lookat   = point3(0, heights.min + 0.15*heights.size(), 0.05*opts.size);
+    }
+    cam.vup = vec3(0,1,0);
 
     cam.defocus_angle = 0;
 
@@ -129,7 +152,15 @@ inline hittable_list terrain_scene(camera& cam, const terrain_options& opts) {
     cam.sky.zenith         = color(0.16, 0.33, 0.72);
     cam.sky.glow_strength  = 0.9;
     cam.sky.glow_sharpness = 14;
+}
 
+// A fractal mountain range under a low sun: fBm and ridged noise sampled into a heightfield,
+// meshed into the BVH, shaded by slope and height, and lit by one directional sun with
+// shadow rays.
+inline hittable_list terrain_scene(camera& cam, const terrain_options& opts) {
+    terrain_model model = build_terrain(opts);
+    hittable_list world = std::move(model.triangles);
+    frame_terrain(cam, opts, model.heights, world);
     return world;
 }
 

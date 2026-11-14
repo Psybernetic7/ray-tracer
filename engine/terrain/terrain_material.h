@@ -3,6 +3,8 @@
 
 #include "render/material.h"
 
+#include <functional>
+
 
 // Terrain shading with no textures: the albedo is a function of where the surface is and which
 // way it faces. Grass in the valleys, bare rock wherever the ground is too steep to hold soil,
@@ -25,6 +27,12 @@ class terrain_material : public material {
     double rock_blend      = 0.28;
     double snow_max_slope  = 0.66;  // Snow slides off anything steeper than this
     double snow_slope_blend = 0.2;
+
+    // Optional: repaints the surface from its u,v coordinates (0..1 across the terrain), given
+    // the albedo the slope and height rules picked. Analysis overlays hang off this, which keeps
+    // the material ignorant of what is being overlaid: a heatmap, a viewshed, anything else.
+    // Called from every render thread at once, so it must not modify shared state.
+    std::function<color(double u, double v, const color& base)> overlay;
 
     explicit terrain_material(const interval& height_range) : heights(height_range) {}
 
@@ -62,9 +70,8 @@ class terrain_material : public material {
                                * (1.0 - smoothstep(snow_max_slope - snow_slope_blend,
                                                    snow_max_slope, slope));
 
-        // M2 hangs its sun-hours and viewshed overlays off rec.u/rec.v here, on top of this
-        // base albedo.
-        return lerp_color(ground, snow, snowiness);
+        const color base = lerp_color(ground, snow, snowiness);
+        return overlay ? overlay(rec.u, rec.v, base) : base;
     }
 
     static color lerp_color(const color& a, const color& b, double t) {

@@ -30,7 +30,7 @@ function(set_project_warnings target)
 endfunction()
 
 # Command-line renderer
-add_executable(rt-cli apps/cli/main.cc apps/cli/image_io.cc)
+add_executable(rt-cli apps/cli/main.cc apps/cli/analyze.cc apps/cli/image_io.cc)
 target_link_libraries(rt-cli PRIVATE engine third_party)
 set_project_warnings(rt-cli)
 if(MINGW)
@@ -46,7 +46,8 @@ if(BUILD_TESTING)
         tests/test_math.cc
         tests/test_geometry.cc
         tests/test_render.cc
-        tests/test_terrain.cc)
+        tests/test_terrain.cc
+        tests/test_analysis.cc)
     target_link_libraries(tests PRIVATE engine third_party)
     set_project_warnings(tests)
     if(MINGW)

@@ -343,3 +343,39 @@ TEST_CASE("terrain material picks albedo by slope and height") {
     color steep_peak = albedo_at(9.5, vec3(1, 0.05, 0));
     CHECK(steep_peak.x() < 0.5);
 }
+
+TEST_CASE("rays through the shared edge of two triangles never slip between them") {
+    // A tilted quad split along its diagonal. Rays aimed exactly at that diagonal must hit one
+    // triangle or the other: rounding in the barycentric test can otherwise put the hit just
+    // outside both, leaving a crack that rays and light leak through.
+    auto mat = make_shared<lambertian>(color(1, 1, 1));
+    auto height = [](double x, double z) { return 0.37*x + 0.71*z + 0.13; };
+    point3 a(0, height(0, 0), 0), b(1, height(1, 0), 0);
+    point3 c(1, height(1, 1), 1), d(0, height(0, 1), 1);
+    hittable_list quad;
+    quad.add(make_shared<triangle>(a, c, b, mat));
+    quad.add(make_shared<triangle>(a, d, c, mat));
+
+    int misses = 0;
+    for (int k = 1; k < 1000; k++) {
+        const double t = k / 1000.0;
+        const point3 on_edge(t, height(t, t), t);
+        for (const vec3& dir : {vec3(0, -1, 0), unit_vector(vec3(-0.7071, -0.3, 0.7071)),
+                                unit_vector(vec3(0.3, -1, -0.2))}) {
+            hit_record rec;
+            if (!quad.hit(ray(on_edge - 2*dir, dir), interval(0.001, infinity), rec))
+                misses++;
+        }
+    }
+    CHECK(misses == 0);
+}
+
+TEST_CASE("terrain generation gives the same field on any number of threads") {
+    terrain_params p;
+    p.seed = 77;
+    heightfield one = generate_heightfield(97, 10.0, 3.0, p, 1);
+    heightfield many = generate_heightfield(97, 10.0, 3.0, p, 8);
+    for (int j = 0; j < one.rows(); j++)
+        for (int i = 0; i < one.cols(); i++)
+            REQUIRE(one.at(i, j) == many.at(i, j));
+}

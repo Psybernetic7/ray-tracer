@@ -6,6 +6,8 @@
 #include "render/framebuffer.h"
 #include "render/renderer.h"
 
+#include "analyze.h"
+#include "cli_args.h"
 #include "image_io.h"
 #include "scenes.h"
 
@@ -31,7 +33,9 @@ struct options {
 
 static void print_usage() {
     std::cerr <<
-        "Usage: rt-cli [options]\n"
+        "Usage: rt-cli [options]            render a scene\n"
+        "       rt-cli analyze [options]    sun-hours and viewshed analysis (see rt-cli analyze --help)\n"
+        "\n"
         "  --scene NAME   terrain | showcase (default terrain)\n"
         "  --width N      image width in pixels (default 1200)\n"
         "  --spp N        samples per pixel (default 500)\n"
@@ -41,55 +45,43 @@ static void print_usage() {
         "  --quiet        don't print progress\n"
         "  --out PATH     output image, .png or .ppm (default image.png)\n"
         "\n"
-        "Terrain scene options:\n"
-        "  --res N        heightfield vertices per side (default 512)\n"
-        "  --octaves N    noise octaves (default 9)\n"
-        "  --frequency F  mountains across the field at the coarsest octave (default 1.6)\n"
-        "  --ridge F      0 = rounded hills, 1 = sharp ridges (default 0.78)\n"
-        "  --warp F       domain warp strength, 0 = off (default 0.35)\n"
-        "  --height F     world height of the tallest peak (default 3.2)\n"
-        "  --sun-elev D   sun elevation above the horizon in degrees (default 19)\n"
-        "  --sun-azim D   sun azimuth in degrees, 0 north / 90 east (default 250)\n"
-        "  --no-sun       light with the sky alone, no sun or shadow rays\n"
-        "  --no-plain     leave out the flat plain under the terrain\n";
+        "Terrain scene options:\n" << terrain_usage <<
+        "  --no-sun       light with the sky alone, no sun or shadow rays\n";
 }
 
 static bool parse_options(int argc, char* argv[], options& opts) {
-    for (int k = 1; k < argc; k++) {
-        std::string arg = argv[k];
-        auto next_value = [&](long long& value) {
-            if (k + 1 >= argc) return false;
-            try { value = std::stoll(argv[++k]); } catch (...) { return false; }
-            return true;
-        };
-        auto next_real = [&](double& value) {
-            if (k + 1 >= argc) return false;
-            try { value = std::stod(argv[++k]); } catch (...) { return false; }
-            return true;
-        };
+    arg_cursor args(argc, argv, 1);
+    while (!args.done()) {
+        const std::string arg = args.next();
+        bool ok = true;
 
-        long long value;
-        double real;
-        if (arg == "--width" && next_value(value) && value > 0)        opts.image_width = int(value);
-        else if (arg == "--spp" && next_value(value) && value > 0)     opts.samples_per_pixel = int(value);
-        else if (arg == "--threads" && next_value(value) && value >= 0) opts.threads = int(value);
-        else if (arg == "--seed" && next_value(value))                 opts.seed = uint64_t(value);
-        else if (arg == "--no-bvh")                                    opts.use_bvh = false;
-        else if (arg == "--quiet")                                     opts.quiet = true;
-        else if (arg == "--out" && k + 1 < argc)                       opts.output = argv[++k];
-        else if (arg == "--scene" && k + 1 < argc)                     opts.scene = argv[++k];
-        else if (arg == "--res" && next_value(value) && value >= 2)    opts.terrain.resolution = int(value);
-        else if (arg == "--octaves" && next_value(value) && value > 0) opts.terrain.terrain.octaves = int(value);
-        else if (arg == "--frequency" && next_real(real) && real > 0)  opts.terrain.terrain.frequency = real;
-        else if (arg == "--ridge" && next_real(real))                  opts.terrain.terrain.ridge_mix = real;
-        else if (arg == "--warp" && next_real(real))                   opts.terrain.terrain.warp = real;
-        else if (arg == "--height" && next_real(real) && real > 0)     opts.terrain.peak_height = real;
-        else if (arg == "--sun-elev" && next_real(real))               opts.terrain.sun_elevation = real;
-        else if (arg == "--sun-azim" && next_real(real))               opts.terrain.sun_azimuth = real;
-        else if (arg == "--no-sun")                                    opts.no_sun = true;
-        else if (arg == "--no-plain")                                  opts.terrain.plain = false;
+        const parse_result terrain = parse_terrain_option(arg, args, opts.terrain);
+        if (terrain == parse_result::ok) continue;
+        if (terrain == parse_result::bad_value) ok = false;
+        else if (arg == "--scene")   ok = args.value(opts.scene);
+        else if (arg == "--width")   ok = args.read_int(opts.image_width, 1);
+        else if (arg == "--spp")     ok = args.read_int(opts.samples_per_pixel, 1);
+        else if (arg == "--threads") ok = args.read_int(opts.threads, 0);
+        else if (arg == "--out")     ok = args.value(opts.output);
+        else if (arg == "--no-bvh")  opts.use_bvh = false;
+        else if (arg == "--quiet")   opts.quiet = true;
+        else if (arg == "--no-sun")  opts.no_sun = true;
+        else if (arg == "--seed") {
+            long long n = 0;
+            ok = args.value(n);
+            opts.seed = uint64_t(n);
+        }
+        else if (arg == "--help") {
+            print_usage();
+            std::exit(0);
+        }
         else {
             std::cerr << "Invalid argument: " << arg << "\n";
+            return false;
+        }
+
+        if (!ok) {
+            std::cerr << "Invalid value for " << arg << "\n";
             return false;
         }
     }
@@ -104,6 +96,9 @@ static bool parse_options(int argc, char* argv[], options& opts) {
 }
 
 int main(int argc, char* argv[]) {
+    if (argc > 1 && std::string(argv[1]) == "analyze")
+        return run_analyze(argc, argv);
+
     options opts;
     if (!parse_options(argc, argv, opts)) {
         print_usage();

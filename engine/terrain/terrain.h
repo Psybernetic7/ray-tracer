@@ -2,6 +2,7 @@
 #define TERRAIN_H
 
 #include "geometry/heightfield.h"
+#include "parallel.h"
 #include "terrain/noise.h"
 
 
@@ -49,8 +50,11 @@ inline double terrain_height(double u, double v, const terrain_params& p) {
         h = std::pow(std::fmax(h, 0.0), p.exponent);
 
     if (p.edge_falloff > 0) {
-        // Distance to the border as a square ring: 0 at the centre, 1 at the edge.
-        const double d = std::fmax(std::fabs(2*u - 1), std::fabs(2*v - 1));
+        // Distance to the border: 0 at the centre, 1 at the middle of each edge. A superellipse
+        // rather than max(|x|, |y|), whose kinks along the diagonals carved visible creases in
+        // from the corners. This one is smooth everywhere and still fills the square.
+        const double x = 2*u - 1, y = 2*v - 1;
+        const double d = std::sqrt(std::sqrt(x*x*x*x + y*y*y*y));
         h *= 1.0 - smoothstep(1.0 - p.edge_falloff, 1.0, d);
     }
 
@@ -59,13 +63,17 @@ inline double terrain_height(double u, double v, const terrain_params& p) {
 
 // Samples the generator into a grid. `size` is the field's world extent in x and z, and
 // `peak_height` the world height of the tallest possible peak.
+//
+// Rows are generated in parallel. terrain_height is a pure function of its inputs, so every
+// vertex is computed independently and the field is identical for any thread count.
 inline heightfield generate_heightfield(int resolution, double size, double peak_height,
-                                        const terrain_params& p) {
+                                        const terrain_params& p, int thread_count = 0) {
     heightfield field(resolution, resolution, size, size);
 
-    for (int j = 0; j < field.rows(); j++)
+    parallel_for(field.rows(), thread_count, [&](int j) {
         for (int i = 0; i < field.cols(); i++)
             field.at(i, j) = peak_height * terrain_height(field.u_at(i), field.v_at(j), p);
+    });
 
     return field;
 }

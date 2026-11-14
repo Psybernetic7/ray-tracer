@@ -47,13 +47,22 @@ class triangle : public hittable {
         const double inv_det = 1.0 / det;
         const vec3 tvec = r.origin() - v0;
 
+        // The barycentric tests accept a hair outside the triangle. A ray aimed exactly at an
+        // edge two triangles share can otherwise round to just outside *both* of them and slip
+        // through the mesh. On a heightfield that is fatal rather than cosmetic: there is
+        // nothing underneath, so a shadow ray that slips through escapes and reports sunlight
+        // from inside a mountain. Rays from a regular analysis grid hit edges exactly all the
+        // time. The overlap is far below a pixel, and a ray that hits both triangles just keeps
+        // the nearer one, which is the same point.
+        constexpr double edge_tolerance = 1e-9;
+
         const double b1 = dot(tvec, pvec) * inv_det;
-        if (b1 < 0 || b1 > 1)
+        if (b1 < -edge_tolerance || b1 > 1 + edge_tolerance)
             return false;
 
         const vec3 qvec = cross(tvec, e1);
         const double b2 = dot(r.direction(), qvec) * inv_det;
-        if (b2 < 0 || b1 + b2 > 1)
+        if (b2 < -edge_tolerance || b1 + b2 > 1 + edge_tolerance)
             return false;
 
         const double t = dot(e2, qvec) * inv_det;
