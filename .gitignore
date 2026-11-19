@@ -16,3 +16,6 @@ main
 !/image.png
 /*.ppm
 *.csv
+
+# Elevation tiles downloaded by rt-cli --center / --download (re-downloadable, ~100 KB each).
+tile-cache/

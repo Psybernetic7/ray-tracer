@@ -109,6 +109,34 @@ class heightfield {
         return mesh;
     }
 
+    // Vertical walls from every border edge down to `base_y`, facing outward. Real terrain is
+    // cut out of a larger landscape, so its border is a cliff of arbitrary height; walls turn
+    // the floating sheet into a solid block, the way a printed relief model looks.
+    hittable_list skirt(double base_y, shared_ptr<material> mat) const {
+        hittable_list walls;
+        auto wall = [&](int i0, int j0, int i1, int j1, const vec3& outward) {
+            const point3 a = vertex_position(i0, j0), b = vertex_position(i1, j1);
+            const point3 a0(a.x(), base_y, a.z()), b0(b.x(), base_y, b.z());
+            // Wind so the geometric normal points outward: (b - a) x (a0 - a) for this order.
+            if (dot(cross(b - a, a0 - a), outward) > 0) {
+                walls.add(make_shared<triangle>(a, b, a0, mat));
+                walls.add(make_shared<triangle>(b, b0, a0, mat));
+            } else {
+                walls.add(make_shared<triangle>(a, a0, b, mat));
+                walls.add(make_shared<triangle>(b, a0, b0, mat));
+            }
+        };
+        for (int i = 0; i < grid_cols - 1; i++) {
+            wall(i, 0, i + 1, 0, vec3(0, 0, -1));                         // North
+            wall(i, grid_rows - 1, i + 1, grid_rows - 1, vec3(0, 0, 1));  // South
+        }
+        for (int j = 0; j < grid_rows - 1; j++) {
+            wall(0, j, 0, j + 1, vec3(-1, 0, 0));                         // West
+            wall(grid_cols - 1, j, grid_cols - 1, j + 1, vec3(1, 0, 0));  // East
+        }
+        return walls;
+    }
+
   private:
     int    grid_cols, grid_rows;
     double extent_x, extent_z;

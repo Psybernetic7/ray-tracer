@@ -4,6 +4,7 @@
 #include "render/material.h"
 
 #include <functional>
+#include <limits>
 
 
 // Terrain shading with no textures: the albedo is a function of where the surface is and which
@@ -21,6 +22,12 @@ class terrain_material : public material {
     // Heights are normalized to 0 at the lowest point of the terrain and 1 at the highest.
     double snow_height = 0.62;  // Snow line
     double snow_blend  = 0.10;  // How gradually the snow line fades in
+
+    // Real terrain has a real snow line. When set (not NaN), snow starts at this world height
+    // instead of at a fraction of the height range, fading in over `snow_altitude_blend`.
+    // Infinity means no snow at all.
+    double snow_altitude       = std::numeric_limits<double>::quiet_NaN();
+    double snow_altitude_blend = 0.0;
 
     // Slope is the sine of the surface's tilt: 0 flat, 0.71 at 45 degrees, 1 vertical.
     double rock_slope      = 0.36;  // Where rock starts to show through the grass
@@ -66,7 +73,10 @@ class terrain_material : public material {
         const double rockiness = smoothstep(rock_slope, rock_slope + rock_blend, slope);
         color ground = lerp_color(grass, rock, rockiness);
 
-        const double snowiness = smoothstep(snow_height, snow_height + snow_blend, height)
+        const double snow_cover = std::isnan(snow_altitude)
+            ? smoothstep(snow_height, snow_height + snow_blend, height)
+            : smoothstep(snow_altitude, snow_altitude + snow_altitude_blend, rec.p.y());
+        const double snowiness = snow_cover
                                * (1.0 - smoothstep(snow_max_slope - snow_slope_blend,
                                                    snow_max_slope, slope));
 

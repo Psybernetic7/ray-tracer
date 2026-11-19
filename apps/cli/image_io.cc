@@ -3,6 +3,10 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include "stb_image.h"
+
 #include <fstream>
 
 
@@ -42,4 +46,17 @@ bool write_image(const std::vector<rgb8>& pixels, int width, int height, const s
     if (!ok)
         error = "failed to write " + path;
     return ok;
+}
+
+bool read_rgb_image(const std::string& path, int& width, int& height, std::vector<uint8_t>& rgb,
+                    std::string& error) {
+    int channels = 0;
+    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 3);
+    if (!data) {
+        error = "failed to read " + path + ": " + stbi_failure_reason();
+        return false;
+    }
+    rgb.assign(data, data + size_t(width) * size_t(height) * 3);
+    stbi_image_free(data);
+    return true;
 }

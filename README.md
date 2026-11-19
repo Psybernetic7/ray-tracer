@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/Psybernetic7/ray-tracer/actions/workflows/ci.yml/badge.svg)](https://github.com/Psybernetic7/ray-tracer/actions/workflows/ci.yml)
 
-A multithreaded ray tracer written in C++ that generates fractal terrain from a seed, renders it
-under a directional sun, and uses the same rays to answer practical questions about it: how many
-hours of direct sun each slope gets in a year, how much solar energy lands on it, and what can be
-seen from a given peak. It also still renders the scene of diffuse, metal and glass spheres it
-started as.
+A multithreaded ray tracer written in C++ that generates fractal terrain from a seed, or loads
+real elevation data for any place on Earth, renders it under a directional sun, and uses the same
+rays to answer practical questions about it: how many hours of direct sun each slope gets in a
+year, how much solar energy lands on it, and what can be seen from a given peak. It also still
+renders the scene of diffuse, metal and glass spheres it started as.
 
 ![Fractal terrain under a low sun](docs/terrain.png)
 
@@ -14,8 +14,9 @@ started as.
 
 ## How it works
 
-1. **Generate a landscape.** Layers of smooth random noise are stacked, from broad mountain shapes
-   down to small bumps, into a grid of heights. The same seed always gives the same mountains.
+1. **Generate a landscape, or load a real one.** Layers of smooth random noise are stacked, from
+   broad mountain shapes down to small bumps, into a grid of heights; the same seed always gives
+   the same mountains. Or the grid is filled from public elevation tiles of a real place.
 2. **Turn it into triangles.** Each square of the grid becomes two triangles, about half a million
    for the default terrain, organised in a bounding volume hierarchy so a ray only has to test a
    handful of them.
@@ -31,11 +32,13 @@ started as.
 
 ```bash
 cmake -S . -B build -G Ninja && cmake --build build
-ctest --test-dir build                                   # 38 unit tests
+ctest --test-dir build                                   # 44 unit tests + 2 end-to-end runs
 
 ./build/rt-cli --res 256 --width 600 --spp 32 --out preview.png    # a terrain render, in seconds
 ./build/rt-cli analyze --width 600 --spp 32 --out sun.png          # sun-hours: sun.png, sun-map.png, sun.csv
 ./build/rt-cli analyze --mode viewshed --width 600 --spp 32        # what the highest peak can see
+./build/rt-cli --place matterhorn --width 600 --spp 32 --out mh.png  # a real mountain, offline
+./build/rt-cli --center 27.988,86.925 --extent 20 --out everest.png  # anywhere: tiles are downloaded
 ```
 
 On Windows the program is `.\build\rt-cli.exe`. Rendered images and CSV files written to the
@@ -52,6 +55,15 @@ repository root are ignored by git.
 - **Directional sun with shadow rays:** the sun is sampled directly at every diffuse hit (next-event estimation) rather than found by chance, and its 0.265° disk gives soft-edged shadows
 - **Any-hit shadow queries:** `occluded()` stops at the first blocker instead of searching for the nearest one, and the BVH skips whole subtrees once one is found
 - **Shading by slope and height:** grass on gentle low ground, bare rock where the slope is too steep to hold soil, snow on high ground that is flat enough to keep it — no textures involved
+
+### Real places
+
+- **Real elevation data:** AWS Open Data [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) in the Terrarium format, where height is encoded in a PNG's colour, so a plain image decoder reads them and no GIS library is needed (which matters for the planned browser build)
+- **Any square of the Earth:** latitude and longitude become Web Mercator tile coordinates; the tiles are downloaded once into a local cache, stitched seamlessly and resampled onto a grid that is square in metres
+- **Automatic detail level:** the tile zoom is picked so the data is at least as fine as the grid it fills, and no finer
+- **Bundled places:** the Grand Canyon, the Matterhorn and Mount Fuji ship with the repository, so they render and analyse offline and in CI
+- **Real sun:** the analysis uses the place's own latitude, and its CSV gains latitude, longitude and elevation in metres for every cell
+- **Relief-model framing:** a cut-out of real terrain is rendered as a solid block with earth-coloured sides, with a real snow line and a desert palette where it fits
 
 ### Sun and visibility analysis
 
@@ -80,7 +92,8 @@ repository root are ignored by git.
 
 - **Language:** C++17
 - **Build:** CMake
-- **Dependencies:** C++ standard library, plus two vendored single-header libraries in [third_party/](third_party/): [stb_image_write](https://github.com/nothings/stb) for PNG output and [doctest](https://github.com/doctest/doctest) for unit tests
+- **Dependencies:** C++ standard library, plus three vendored single-header libraries in [third_party/](third_party/): [stb_image](https://github.com/nothings/stb) and stb_image_write for PNG input and output, and [doctest](https://github.com/doctest/doctest) for unit tests
+- **At run time:** `curl`, only to download elevation tiles for places that aren't bundled. It comes with Windows 10 and later, macOS and Linux
 
 ## Getting Started
 
@@ -113,12 +126,15 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The 38 test cases check, among other things: the BVH finds exactly the hits a brute-force scan
+The 44 test cases check, among other things: the BVH finds exactly the hits a brute-force scan
 finds; renders are identical on any number of threads; rays can't slip between two triangles that
 share an edge; the sun's position matches known values (London's 62° midsummer noon sun, Sydney's
 winter sun in the north, polar night); horizon-map sun-hours agree with brute force on fractal
-terrain; and a viewshed is blocked by a ridge but sees a tall enough mast behind it. CI runs them
-on Ubuntu and Windows for every push.
+terrain; a viewshed is blocked by a ridge but sees a tall enough mast behind it; Terrarium
+decoding matches Everest's height to the encoding's 1/256 m; tile coordinates match the standard
+slippy-map tiles; and stitched tiles have no seams, checked with a ramp that bilinear filtering
+must reproduce exactly. Two more tests render and analyse a bundled place end to end, offline.
+CI runs them on Ubuntu and Windows for every push.
 
 ## Usage
 
@@ -190,7 +206,7 @@ It also prints the range and mean of the result.
 | `--grid N` | `256` | Analysis cells per side |
 | `--no-render` | off | Write only the map and the CSV |
 | `--width N`, `--spp N` | `1200`, `64` | Render size and samples per pixel |
-| `--lat D` | `46.5` | Latitude in degrees north (46.5 runs through the Swiss Alps) |
+| `--lat D` | place, or `46.5` | Latitude in degrees north: a real place's own, or 46.5 (through the Swiss Alps) for generated terrain |
 | `--day-step N` | `7` | Sample every Nth day of the year |
 | `--minutes N` | `15` | Time step through each sampled day |
 | `--quantity NAME` | `hours` | `hours` per year, or `irradiance` in kWh/m² per year |
@@ -218,6 +234,63 @@ the next.
 Maps are drawn with north at the top and lit from the north-west, the cartographic convention.
 
 ![The viewshed from the highest peak, painted onto the terrain](docs/viewshed.png)
+
+### Real places
+
+```bash
+./build/rt-cli --place matterhorn --out matterhorn.png              # bundled, works offline
+./build/rt-cli --center 36.2465,-112.1134 --extent 12 --out rim.png   # any latitude,longitude
+./build/rt-cli analyze --place grand-canyon --out canyon-sun.png    # sun-hours at 36.1° N
+./build/rt-cli analyze --place matterhorn --mode viewshed --eye 0.01 --out summit.png
+```
+
+![The Matterhorn and the glaciers of the Swiss-Italian border, from real elevation data](docs/matterhorn.png)
+
+*The Matterhorn, 16 km square, from 30 m elevation data. The snow line is set at 2,900 m.*
+
+| Grand Canyon | Mount Fuji |
+| --- | --- |
+| ![The Grand Canyon](docs/grand-canyon.png) | ![Mount Fuji](docs/fuji.png) |
+| 24 km square across the canyon: the South Rim, the Colorado River 1,400 m below it, and the higher North Rim. | 32 km square: the whole cone, its summit crater and the foothills. True scale, with no vertical exaggeration. |
+
+| Sun-hours in the Grand Canyon | Viewshed from the Matterhorn |
+| --- | --- |
+| ![Sun-hours in the Grand Canyon](docs/grand-canyon-sun-hours.png) | ![Viewshed from the Matterhorn](docs/matterhorn-viewshed.png) |
+| The plateaus get all 4,385 hours of daylight a year; north-facing walls and narrow side canyons get as few as 436. | Orange is the ground visible from the summit (red): 42% of the square. The summit's own steep faces stay hidden, as they do from any convex peak. |
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--place NAME` | | `grand-canyon`, `matterhorn` or `fuji`, loaded from [data/places/](data/places/) |
+| `--center LAT,LON` | | The centre of any square on Earth, in degrees north and east |
+| `--extent KM` | `20` | Side of the square around `--center` |
+| `--zoom N` | automatic | Tile zoom from 0 to 15; each step halves the pixel size and quadruples the download |
+| `--exaggerate F` | `1` | Vertical exaggeration |
+| `--download` | off | Fetch tiles for a `--place` instead of using its bundled copy (needed for `--res` above 512) |
+| `--tile-cache DIR` | `tile-cache` | Where downloaded tiles are kept; each is downloaded once, ever |
+| `--save-dem PATH` | | Also write the region's elevations as one Terrarium PNG. The bundled places were made this way |
+
+These work with both `rt-cli` and `rt-cli analyze`. Real terrain is built at one world unit per
+kilometre, so the analysis options keep their meaning: `--eye 0.002` is still a person 2 m tall,
+and the sun is computed for the place's own latitude unless `--lat` overrides it.
+
+How much is downloaded for the default 512×512 grid:
+
+| Place | Square | Zoom | Pixel size | Tiles | Download |
+| --- | --- | --- | --- | --- | --- |
+| Matterhorn | 16 km | 12 | 26.6 m | 12 | 1.6 MB |
+| Grand Canyon | 24 km | 12 | 30.9 m | 16 | 2.2 MB |
+| Mount Fuji | 32 km | 11 | 62.3 m | 9 | 0.5 MB |
+
+**What 30 m data can't show.** A sharp summit is narrower than a data pixel, so the data rounds
+it into a dome: the Matterhorn's 4,478 m peak comes out at 4,354 m at every zoom level up to 14.
+That dome changes the viewshed. From 2 m above it you can't see down the faces, so only 13% of
+the square is visible. Raising the eye to 10 m stands in for the missing pinnacle and brings it to
+42%. Sun-hours are much less sensitive, because a lost spire only shades a few cells.
+
+**Agreement on real terrain.** Horizon maps and brute force agree even more closely on real
+terrain than on the fractal range. On the Matterhorn, with the default year sampling, the mean
+difference is 0.08% of the maximum and the worst cell 0.7%. The horizon map is 2.6× faster and
+casts 6.1× fewer rays.
 
 ### Camera settings
 
@@ -330,8 +403,8 @@ The project is being built in milestones, each ending in something visible.
 | M0 Foundation | Done | Engine library, BVH, multithreaded tile renderer, PNG output, CMake, tests, CI |
 | M1 Fractal terrain | Done | Noise terrain, triangle meshes, directional sun and shadows, slope and height shading |
 | M2 Sun and visibility analysis | Done | Solar position, sun-hours, irradiance, horizon maps, viewsheds, maps and CSV |
-| M3 Real places | Next | Real elevation data (the Alps, the Grand Canyon, Mount Fuji) from public terrain tiles |
-| M4 Browser app | Planned | WebAssembly build: drag the sun, generate worlds, click a peak to see its viewshed |
+| M3 Real places | Done | Real elevation data from public terrain tiles for any place, with bundled Grand Canyon, Matterhorn and Mount Fuji |
+| M4 Browser app | Next | WebAssembly build: drag the sun, generate worlds, click a peak to see its viewshed |
 | M5 Showcase polish | Planned | Architecture diagram, design decision records, more benchmarks |
 
 ## Project Structure
@@ -343,15 +416,34 @@ The project is being built in milestones, each ending in something visible.
 │   ├── parallel.h          # parallel_for over a pool of threads
 │   ├── math/               # vec3, ray, interval, color, colormaps, constants, random generator
 │   ├── geometry/           # Hittable interface, sphere, triangle, heightfield, AABB, BVH
-│   ├── terrain/            # Gradient noise, fBm, ridged multifractal, terrain shading
+│   ├── terrain/            # Noise, fBm, ridged multifractal, shading, DEM tiles, place presets
 │   ├── lighting/           # Directional sun, sky, solar position, clear-sky irradiance
 │   ├── analysis/           # Analysis grid, sun-hours, horizon maps, viewsheds
 │   └── render/             # Camera, materials, framebuffer, multithreaded renderer
-├── apps/cli/               # Command line: render and analyze commands, scenes, image and CSV output
+├── apps/cli/               # Command line: render and analyze commands, scenes, tile download, image and CSV I/O
+├── data/places/            # Bundled elevation for the preset places (Terrarium PNGs)
 ├── docs/                   # Reference renders and analysis maps
 ├── tests/                  # Unit tests (doctest)
 ├── third_party/            # Vendored single-header libraries
 └── CMakeLists.txt
 ```
 
+## Elevation data credits
 
+Real terrain comes from the [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) dataset
+on AWS Open Data (Mapzen, a Linux Foundation project). The bundled files in
+[data/places/](data/places/) are resampled from it. Its
+[attribution terms](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) ask for the
+following credits:
+
+* ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery and funded under National Science Foundation awards 1043681, 1559691, and 1542736;
+* Australia terrain data © Commonwealth of Australia (Geoscience Australia) 2017;
+* Austria terrain data © offene Daten Österreichs – Digitales Geländemodell (DGM) Österreich;
+* Canada terrain data contains information licensed under the Open Government Licence – Canada;
+* Europe terrain data produced using Copernicus data and information funded by the European Union - EU-DEM layers;
+* Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration
+* Mexico terrain data source: INEGI, Continental relief, 2016;
+* New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information New Zealand and the New Zealand Government (All rights reserved);
+* Norway terrain data © Kartverket;
+* United Kingdom terrain data © Environment Agency copyright and/or database right 2015. All rights reserved;
+* United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. Geological Survey.

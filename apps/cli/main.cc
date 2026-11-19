@@ -8,6 +8,7 @@
 
 #include "analyze.h"
 #include "cli_args.h"
+#include "dem_source.h"
 #include "image_io.h"
 #include "scenes.h"
 
@@ -105,6 +106,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    std::string error;
+    if (opts.scene == "terrain" && !load_dem(opts.terrain, opts.threads, error)) {
+        std::cerr << error << "\n";
+        return 1;
+    }
+
     camera cam;
     seed_random(opts.seed);
 
@@ -141,7 +148,6 @@ int main(int argc, char* argv[]) {
     r.render_pass(cam, *world, fb, opts.samples_per_pixel);
     std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
 
-    std::string error;
     if (!write_image(fb, opts.output, error)) {
         std::cerr << "\n" << error << "\n";
         return 1;
@@ -149,5 +155,7 @@ int main(int argc, char* argv[]) {
 
     std::fprintf(stderr, "\rRendered %dx%d at %d spp in %.2f s -> %s\n",
                  fb.width(), fb.height(), fb.samples_per_pixel(), elapsed.count(), opts.output.c_str());
+    if (opts.terrain.dem.loaded())
+        std::fprintf(stderr, "%s\n", dem_attribution);
     return 0;
 }

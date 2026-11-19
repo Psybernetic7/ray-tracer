@@ -15,6 +15,7 @@
 #include "render/renderer.h"
 
 #include "cli_args.h"
+#include "dem_source.h"
 #include "image_io.h"
 #include "scenes.h"
 
@@ -34,6 +35,7 @@ struct analyze_options {
     std::string quantity = "hours";      // hours | irradiance
 
     sun_schedule schedule;
+    bool   latitude_given = false;  // Otherwise real terrain uses its own latitude
     int    grid    = 256;   // Analysis cells per side
     int    threads = 0;
 
@@ -65,7 +67,8 @@ void print_usage() {
         "  --spp N            render samples per pixel (default 64)\n"
         "\n"
         "Sun-hours:\n"
-        "  --lat D            latitude in degrees north (default 46.5)\n"
+        "  --lat D            latitude in degrees north (default: the real terrain's own, or\n"
+        "                     46.5 for generated terrain)\n"
         "  --day-step N       sample every Nth day of the year (default 7)\n"
         "  --minutes N        time step through each day (default 15)\n"
         "  --quantity NAME    hours | irradiance: sun-hours per year, or direct-beam kWh/m^2 per\n"
@@ -122,7 +125,7 @@ bool parse_options(int argc, char* argv[], analyze_options& opts) {
         else if (arg == "--method")     ok = args.value(opts.method);
         else if (arg == "--quantity")   ok = args.value(opts.quantity);
         else if (arg == "--out")        ok = args.value(opts.output);
-        else if (arg == "--lat")        ok = args.read_real(opts.schedule.latitude);
+        else if (arg == "--lat")        ok = (opts.latitude_given = args.read_real(opts.schedule.latitude));
         else if (arg == "--day-step")   ok = args.read_int(opts.schedule.day_step, 1);
         else if (arg == "--minutes")    ok = args.read_real(opts.schedule.minutes, true);
         else if (arg == "--grid")       ok = args.read_int(opts.grid, 2);
@@ -252,18 +255,27 @@ bool write_map(const analysis_grid& grid, const scalar_map& map, const value_col
 }
 
 // Every valid cell as a row: world position, ground height and value. Long format, so it loads
-// straight into a spreadsheet, pandas or a GIS.
+// straight into a spreadsheet, pandas or a GIS. Real terrain also gets each cell's latitude and
+// longitude, and its elevation in metres above sea level instead of world units.
 bool write_csv(const analysis_grid& grid, const scalar_map& map, const std::string& column,
-               const std::string& path) {
+               const dem_options& dem, const std::string& path) {
     std::ofstream out(path);
     if (!out) return false;
-    out << "x,z,elevation," << column << "\n";
-    char line[128];
+    const bool geo = dem.loaded();
+    out << (geo ? "lat,lon,x_km,z_km,elevation_m," : "x,z,elevation,") << column << "\n";
+    char line[160];
     for (int y = 0; y < map.height(); y++) {
         for (int x = 0; x < map.width(); x++) {
             if (!grid.valid(x, y)) continue;
             const point3& p = grid.ground(x, y);
-            std::snprintf(line, sizeof line, "%.5f,%.5f,%.5f,%.6g\n", p.x(), p.z(), p.y(), map.at(x, y));
+            if (geo) {
+                double lat, lon;
+                dem.region.offset(1000 * p.x(), -1000 * p.z(), lat, lon);  // North is -z
+                std::snprintf(line, sizeof line, "%.6f,%.6f,%.4f,%.4f,%.1f,%.6g\n", lat, lon, p.x(),
+                              p.z(), 1000 * p.y() / dem.exaggeration, map.at(x, y));
+            } else {
+                std::snprintf(line, sizeof line, "%.5f,%.5f,%.5f,%.6g\n", p.x(), p.z(), p.y(), map.at(x, y));
+            }
             out << line;
         }
     }
@@ -282,12 +294,27 @@ int run_analyze(int argc, char* argv[]) {
     const bool irradiance = opts.quantity == "irradiance";
     const sun_quantity quantity = irradiance ? sun_quantity::irradiance : sun_quantity::hours;
 
+    // Real elevation data, if asked for. Its latitude is where the sun is computed for, unless
+    // --lat says otherwise.
+    std::string error;
+    if (!load_dem(opts.terrain, opts.threads, error)) {
+        std::cerr << error << "\n";
+        return 1;
+    }
+    const dem_options& dem = opts.terrain.dem;
+    if (dem.loaded() && !opts.latitude_given)
+        opts.schedule.latitude = dem.region.lat;
+
     // Terrain, mesh and BVH. The same BVH serves the analysis and, later, the render.
     auto start = std::chrono::steady_clock::now();
     terrain_model model = build_terrain(opts.terrain);
     auto mesh = make_shared<bvh_node>(model.triangles);
-    std::fprintf(stderr, "Terrain: seed %llu, %zu triangles, built in %.2f s\n",
-                 (unsigned long long)opts.seed, model.triangles.objects.size(), seconds_since(start));
+    if (dem.loaded())
+        std::fprintf(stderr, "Terrain: %s, %zu triangles, built in %.2f s\n",
+                     dem.label.c_str(), model.triangles.objects.size(), seconds_since(start));
+    else
+        std::fprintf(stderr, "Terrain: seed %llu, %zu triangles, built in %.2f s\n",
+                     (unsigned long long)opts.seed, model.triangles.objects.size(), seconds_since(start));
 
     start = std::chrono::steady_clock::now();
     analysis_grid grid(*mesh, opts.terrain.size, opts.terrain.size, opts.grid, opts.grid, opts.threads);
@@ -391,16 +418,17 @@ int run_analyze(int argc, char* argv[]) {
     const std::string map_path = stem + "-map.png", csv_path = stem + ".csv";
     value_colors colors{opts.mode, irradiance, result.range()};
 
-    std::string error;
     if (!write_map(grid, result, colors, marker_x, marker_y, map_path, error)) {
         std::cerr << error << "\n";
         return 1;
     }
-    if (!write_csv(grid, result, column, csv_path)) {
+    if (!write_csv(grid, result, column, opts.terrain.dem, csv_path)) {
         std::cerr << "failed to write " << csv_path << "\n";
         return 1;
     }
     std::fprintf(stderr, "Wrote %s and %s\n", map_path.c_str(), csv_path.c_str());
+    if (dem.loaded())
+        std::fprintf(stderr, "%s\n", dem_attribution);
 
     if (!opts.render)
         return 0;
@@ -421,6 +449,8 @@ int run_analyze(int argc, char* argv[]) {
 
     camera cam;
     hittable_list world(mesh);
+    for (const auto& wall : model.skirt.objects)
+        world.add(wall);
     frame_terrain(cam, opts.terrain, model.heights, world, terrain_view::overview);
 
     // A neutral white sun and a paler sky, so the colormap's colours come through unchanged.
