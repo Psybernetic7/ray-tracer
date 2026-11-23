@@ -1,20 +1,49 @@
-# Ray Tracer
+# Terrain & Sun Studio
 
 [![CI](https://github.com/Psybernetic7/ray-tracer/actions/workflows/ci.yml/badge.svg)](https://github.com/Psybernetic7/ray-tracer/actions/workflows/ci.yml)
 [![Web app](https://github.com/Psybernetic7/ray-tracer/actions/workflows/pages.yml/badge.svg)](https://github.com/Psybernetic7/ray-tracer/actions/workflows/pages.yml)
 
 A multithreaded ray tracer written in C++ that generates fractal terrain from a seed, or loads
-real elevation data for any place on Earth, renders it under a directional sun, and uses the same
-rays to answer practical questions about it: how many hours of direct sun each slope gets in a
-year, how much solar energy lands on it, and what can be seen from a given peak. It also still
-renders the scene of diffuse, metal and glass spheres it started as.
+real elevation data for any place on Earth, renders it under the real sun, and uses the same rays
+to answer practical questions about it: how many hours of direct sun each slope gets in a year,
+how much solar energy lands on it, and what can be seen from any point. It runs as a command-line
+tool and, compiled to WebAssembly, as an interactive app in the browser. It also still renders
+the scene of diffuse, metal and glass spheres it started as.
 
-**[Try it in your browser](https://psybernetic7.github.io/ray-tracer/)**: the same C++ engine,
-compiled to WebAssembly, running on every core of your own CPU.
+**[▶ Try it in your browser](https://psybernetic7.github.io/ray-tracer/)**: nothing to install;
+every pixel is traced on your own CPU, on all of its cores.
 
 ![Fractal terrain under a low sun](docs/terrain.png)
 
-*A 512×512 heightfield — about 522,000 triangles — generated from seed 1 and rendered at 1200×675.*
+*A 512×512 heightfield (about 522,000 triangles) generated from seed 1 and rendered at 1200×675.*
+
+## Highlights
+
+- **40× faster than where it started:** a bounding volume hierarchy and a tile renderer on every
+  core take the original sphere scene from 25.1 s to 0.62 s
+- **Half a million triangles, barely slower than thirty thousand:** sixteen times the geometry
+  costs only 1.4× the render time
+- **Horizon maps make a year of sun cheap:** measuring each point's skyline once turns every sun
+  position into a table lookup, 40× faster than brute force at fine sampling and within 1% of it
+- **Real places, no GIS library:** public elevation tiles are decoded, stitched and resampled by
+  the engine itself, for any square of the Earth
+- **One engine, two front ends:** the C++ core has no file or network code in it, so the same
+  headers build a native CLI and a 180 KB WebAssembly module that runs at about half native speed
+- **Tested and deployed by CI:** 51 unit tests and two end-to-end runs on Ubuntu and Windows for
+  every push, and every push to `main` republishes the browser app
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Features](#features)
+- [Browser app](#browser-app)
+- [Command line](#command-line)
+- [Performance](#performance)
+- [Building and testing](#building-and-testing)
+- [Project structure](#project-structure)
+- [Roadmap](#roadmap)
+- [Elevation data credits](#elevation-data-credits)
 
 ## How it works
 
@@ -31,22 +60,25 @@ compiled to WebAssembly, running on every core of your own CPU.
    the sun's position for every daylight moment of a year and count the hours it gets through:
    that is the sun-hours map. Aim it from a summit at every point on the ground: that is what you
    can see from there.
+5. **Run it anywhere.** The engine does no file or network I/O of its own. The command line wraps
+   it with files and downloads; the browser app wraps it with a Web Worker and a page.
 
 ## Quick start
 
 ```bash
 cmake -S . -B build -G Ninja && cmake --build build
-ctest --test-dir build                                   # 51 unit tests + 2 end-to-end runs
+ctest --test-dir build                                               # 51 unit tests + 2 end-to-end runs
 
-./build/rt-cli --res 256 --width 600 --spp 32 --out preview.png    # a terrain render, in seconds
-./build/rt-cli analyze --width 600 --spp 32 --out sun.png          # sun-hours: sun.png, sun-map.png, sun.csv
-./build/rt-cli analyze --mode viewshed --width 600 --spp 32        # what the highest peak can see
+./build/rt-cli --res 256 --width 600 --spp 32 --out preview.png      # a terrain render, in seconds
+./build/rt-cli analyze --width 600 --spp 32 --out sun.png            # sun-hours: sun.png, sun-map.png, sun.csv
+./build/rt-cli analyze --mode viewshed --width 600 --spp 32          # what the highest peak can see
 ./build/rt-cli --place matterhorn --width 600 --spp 32 --out mh.png  # a real mountain, offline
 ./build/rt-cli --center 27.988,86.925 --extent 20 --out everest.png  # anywhere: tiles are downloaded
 ```
 
 On Windows the program is `.\build\rt-cli.exe`. Rendered images and CSV files written to the
-repository root are ignored by git. To run the browser app locally, see [Browser app](#browser-app-1).
+repository root are ignored by git. To run the browser app locally, see
+[Browser app](#run-it-locally).
 
 ## Features
 
@@ -58,12 +90,12 @@ repository root are ignored by git. To run the browser app locally, see [Browser
 - **Triangle primitive:** Möller–Trumbore intersection, interpolated normals and surface coordinates
 - **Directional sun with shadow rays:** the sun is sampled directly at every diffuse hit (next-event estimation) rather than found by chance, and its 0.265° disk gives soft-edged shadows
 - **Any-hit shadow queries:** `occluded()` stops at the first blocker instead of searching for the nearest one, and the BVH skips whole subtrees once one is found
-- **Shading by slope and height:** grass on gentle low ground, bare rock where the slope is too steep to hold soil, snow on high ground that is flat enough to keep it — no textures involved
+- **Shading by slope and height:** grass on gentle low ground, bare rock where the slope is too steep to hold soil, snow on high ground that is flat enough to keep it, with no textures involved
 
 ### Real places
 
-- **Real elevation data:** AWS Open Data [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) in the Terrarium format, where height is encoded in a PNG's colour, so a plain image decoder reads them and no GIS library is needed (which matters for the planned browser build)
-- **Any square of the Earth:** latitude and longitude become Web Mercator tile coordinates; the tiles are downloaded once into a local cache, stitched seamlessly and resampled onto a grid that is square in metres
+- **Real elevation data:** AWS Open Data [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) in the Terrarium format, where height is encoded in a PNG's colour, so a plain image decoder reads them and no GIS library is needed, in the CLI or in the browser
+- **Any square of the Earth:** latitude and longitude become Web Mercator tile coordinates; the tiles are downloaded once, stitched seamlessly and resampled onto a grid that is square in metres
 - **Automatic detail level:** the tile zoom is picked so the data is at least as fine as the grid it fills, and no finer
 - **Bundled places:** the Grand Canyon, the Matterhorn and Mount Fuji ship with the repository, so they render and analyse offline and in CI
 - **Real sun:** the analysis uses the place's own latitude, and its CSV gains latitude, longitude and elevation in metres for every cell
@@ -73,13 +105,13 @@ repository root are ignored by git. To run the browser app locally, see [Browser
 
 - **Solar position:** NOAA's equations give the sun's direction for any latitude, day and time, checked against known values such as London's 62° midsummer noon sun
 - **Annual sun-hours:** for every cell of a grid over the terrain, add up the hours its ground can see the sun across a sampled year
-- **Solar irradiance:** the same, weighted by how squarely the sun strikes the slope and by clear-sky atmospheric attenuation, in kWh/m² per year — the number solar-panel siting uses
+- **Solar irradiance:** the same, weighted by how squarely the sun strikes the slope and by clear-sky atmospheric attenuation, in kWh/m² per year: the number solar-panel siting uses
 - **Horizon maps:** measure each cell's skyline once in 64 compass directions, and every sun position after that is a table lookup instead of a ray. The answer is checked against brute force, which casts a ray per cell per sun position
 - **Viewsheds:** everything visible from an observer, one ray per cell
 - **Three outputs per analysis:** a 3D render with the result painted onto the terrain, a flat top-down map with relief shading, and the raw values as CSV for a spreadsheet, pandas or a GIS
 - **Perceptually uniform colormaps:** viridis and inferno
 
-### Browser app
+### In the browser
 
 - **The same engine, in the browser:** the C++ core compiled to WebAssembly with Emscripten; nothing is rendered on a server
 - **Multithreaded:** WebAssembly threads on every core when the page is cross-origin isolated, with a single-threaded build as the fallback
@@ -104,57 +136,71 @@ repository root are ignored by git. To run the browser app locally, see [Browser
 - **Progressive rendering:** samples accumulate across passes, so an image can be refined over time
 - **PNG and PPM output**
 
-## Tech Stack
+## Browser app
 
-- **Language:** C++17; TypeScript for the browser app
-- **Build:** CMake; Emscripten for WebAssembly, Vite for the web front end
-- **Dependencies:** C++ standard library, plus three vendored single-header libraries in [third_party/](third_party/): [stb_image](https://github.com/nothings/stb) and stb_image_write for PNG input and output, and [doctest](https://github.com/doctest/doctest) for unit tests
-- **At run time:** `curl`, only to download elevation tiles for places that aren't bundled. It comes with Windows 10 and later, macOS and Linux
+**[Open the app](https://psybernetic7.github.io/ray-tracer/)**
 
-## Getting Started
+![The browser app showing Mount Everest from downloaded elevation tiles](docs/web-app.png)
 
-### Prerequisites
+*Mount Everest, 20 km square, downloaded and ray-traced in the browser on 16 threads.*
 
-- A C++17 compiler such as `g++`, `clang++` or MSVC
-- CMake 3.20 or newer (Ninja recommended)
+### Using it
 
-On Windows, MSYS2 provides all three: install `mingw-w64-x86_64-gcc`, `mingw-w64-x86_64-cmake` and
-`mingw-w64-x86_64-ninja` with `pacman`, then put `C:\msys64\mingw64\bin` on your `PATH` before
-building.
+- **Terrain:** generate a fractal range (change the seed, ridges, warp and height), open one of
+  the bundled places, or pick "Anywhere on Earth" and enter a latitude and longitude, or choose an
+  example such as Mount Everest or Yosemite Valley
+- **Show:** *Light* for the rendered terrain under the sun at a chosen date and time; *Sun-hours*
+  and *Solar energy* for the yearly maps; *Viewshed* to see what is visible from a red marker,
+  which you move by clicking the terrain
+- **Camera:** drag to orbit, scroll or pinch to zoom, or use the arrow keys
+- **Read-out:** hover over the terrain for the value, elevation and coordinates under the cursor
+- **Under the hood:** the panel at the bottom shows the thread count, triangle count and how long
+  each step took
 
-### Installation
+### How it is built
+
+The app lives in [apps/web/](apps/web/) and has four layers:
+
+1. **[studio.h](apps/web/native/studio.h):** a C++ session class that keeps the terrain, camera,
+   sun and analysis between calls, and redoes only what a change affects. Moving the camera
+   keeps the mesh; changing the latitude keeps the horizon map. It is plain C++, so the unit
+   tests drive it without a browser.
+2. **[bindings.cc](apps/web/native/bindings.cc):** a thin
+   [embind](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html) layer
+   that exposes the session to JavaScript. Elevation PNGs are decoded here with stb_image rather
+   than by the browser, whose colour management could change the heights the colours encode.
+3. **[worker.ts](apps/web/src/worker.ts):** a Web Worker that loads the WebAssembly module, runs
+   the progressive render loop and downloads elevation tiles, so the page never freezes.
+4. **[main.ts](apps/web/src/main.ts):** the page: controls, camera interaction and drawing. It
+   talks to the worker only through the messages in [protocol.ts](apps/web/src/protocol.ts).
+
+Threads in WebAssembly share memory through `SharedArrayBuffer`, which browsers only allow on a
+page served with two cross-origin isolation headers. The dev server sends them; GitHub Pages
+can't, so [coi-serviceworker.js](apps/web/public/coi-serviceworker.js) adds them from a service
+worker and reloads the page once. Where that isn't possible, the app loads the single-threaded
+module instead.
+
+### Run it locally
+
+You need the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)
+(4.0.10, the version CI uses) activated in your shell, plus Node.js and Ninja:
 
 ```bash
-git clone https://github.com/Psybernetic7/ray-tracer.git
-cd ray-tracer
+cd apps/web
+npm install
+npm run wasm      # builds public/wasm/studio-mt and studio-st with Emscripten
+npm run dev       # http://localhost:5173
 ```
 
-### Build
+`npm run build` writes the finished site to `apps/web/dist/`, and `npm run preview` serves it.
+Add `?single` to the address to force the single-threaded build.
 
-```bash
-cmake -S . -B build -G Ninja
-cmake --build build
-```
+To publish your own copy, enable GitHub Pages with "GitHub Actions" as the source in the
+repository settings; [pages.yml](.github/workflows/pages.yml) then deploys every push to `main`.
 
-### Run the tests
+## Command line
 
-```bash
-ctest --test-dir build --output-on-failure
-```
-
-The 51 test cases check, among other things: the BVH finds exactly the hits a brute-force scan
-finds; renders are identical on any number of threads; rays can't slip between two triangles that
-share an edge; the sun's position matches known values (London's 62° midsummer noon sun, Sydney's
-winter sun in the north, polar night); horizon-map sun-hours agree with brute force on fractal
-terrain; a viewshed is blocked by a ridge but sees a tall enough mast behind it; Terrarium
-decoding matches Everest's height to the encoding's 1/256 m; tile coordinates match the standard
-slippy-map tiles; and stitched tiles have no seams, checked with a ramp that bilinear filtering
-must reproduce exactly; and the browser app's session object renders progressively, picks the
-terrain under the cursor and reuses its horizon map when only the latitude changes. Two more tests
-render and analyse a bundled place end to end, offline.
-CI runs them on Ubuntu and Windows for every push.
-
-## Usage
+### Rendering
 
 ```bash
 ./build/rt-cli --out terrain.png
@@ -185,7 +231,7 @@ For a quick preview, use something like `--res 256 --width 500 --spp 32`.
 | `--height F` | `3.2` | World height of the tallest possible peak |
 | `--sun-elev D` | `19` | Sun elevation above the horizon, in degrees |
 | `--sun-azim D` | `250` | Sun azimuth, in compass degrees: `0` north, `90` east |
-| `--no-sun` | off | Light with the sky alone — no sun and no shadow rays |
+| `--no-sun` | off | Light with the sky alone: no sun and no shadow rays |
 | `--no-plain` | off | Leave out the flat plain the terrain sits on |
 
 `--seed` picks the mountain range: the same seed always generates the same terrain.
@@ -256,9 +302,9 @@ Maps are drawn with north at the top and lit from the north-west, the cartograph
 ### Real places
 
 ```bash
-./build/rt-cli --place matterhorn --out matterhorn.png              # bundled, works offline
+./build/rt-cli --place matterhorn --out matterhorn.png                # bundled, works offline
 ./build/rt-cli --center 36.2465,-112.1134 --extent 12 --out rim.png   # any latitude,longitude
-./build/rt-cli analyze --place grand-canyon --out canyon-sun.png    # sun-hours at 36.1° N
+./build/rt-cli analyze --place grand-canyon --out canyon-sun.png      # sun-hours at 36.1° N
 ./build/rt-cli analyze --place matterhorn --mode viewshed --eye 0.01 --out summit.png
 ```
 
@@ -289,7 +335,8 @@ Maps are drawn with north at the top and lit from the north-west, the cartograph
 
 These work with both `rt-cli` and `rt-cli analyze`. Real terrain is built at one world unit per
 kilometre, so the analysis options keep their meaning: `--eye 0.002` is still a person 2 m tall,
-and the sun is computed for the place's own latitude unless `--lat` overrides it.
+and the sun is computed for the place's own latitude unless `--lat` overrides it. Downloading
+needs `curl`, which comes with Windows 10 and later, macOS and Linux.
 
 How much is downloaded for the default 512×512 grid:
 
@@ -309,38 +356,6 @@ the square is visible. Raising the eye to 10 m stands in for the missing pinnacl
 terrain than on the fractal range. On the Matterhorn, with the default year sampling, the mean
 difference is 0.08% of the maximum and the worst cell 0.7%. The horizon map is 2.6× faster and
 casts 6.1× fewer rays.
-
-### Browser app
-
-![The browser app showing Mount Everest from downloaded elevation tiles](docs/web-app.png)
-
-*Mount Everest, 20 km square, downloaded and ray-traced in the browser on 16 threads.*
-
-The app lives in [apps/web/](apps/web/): a C++ session class ([studio.h](apps/web/native/studio.h))
-that keeps the terrain, camera, sun and analysis between calls, a thin
-[embind](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html) layer
-that exposes it to JavaScript, a Web Worker that runs it, and the page around them. To run it
-locally you need the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)
-(4.0.10, the version CI uses) activated in your shell, Node.js and Ninja:
-
-```bash
-cd apps/web
-npm install
-npm run wasm      # builds public/wasm/studio-mt and studio-st with Emscripten
-npm run dev       # http://localhost:5173
-```
-
-`npm run build` writes the finished site to `apps/web/dist/`, and `npm run preview` serves it.
-Add `?single` to the address to force the single-threaded build.
-
-Threads in WebAssembly share memory through `SharedArrayBuffer`, which browsers only allow on a
-page served with two cross-origin isolation headers. The dev server sends them; GitHub Pages
-can't, so [coi-serviceworker.js](apps/web/public/coi-serviceworker.js) adds them from a service
-worker and reloads the page once. Where that isn't possible the app loads the single-threaded
-module instead.
-
-To publish your own copy, enable GitHub Pages with "GitHub Actions" as the source in the
-repository settings; [pages.yml](.github/workflows/pages.yml) then deploys every push to `main`.
 
 ### Camera settings
 
@@ -377,8 +392,8 @@ cost of a ray grows with the *depth* of the tree, not the number of triangles in
 what actually scales with the triangle count, and at 512×512 three quarters of it is the BVH
 itself; generating the terrain runs on every thread and takes 0.02 s.
 
-To show the same thing from the other side, here is a deliberately small mesh — 7,938 triangles at
-200×112 and 8 samples per pixel — with and without the BVH:
+To show the same thing from the other side, here is a deliberately small mesh (7,938 triangles at
+200×112 and 8 samples per pixel) with and without the BVH:
 
 | Configuration | Time | Speedup |
 | --- | --- | --- |
@@ -392,21 +407,6 @@ lands on it. The shadow ray that replaces that search uses `occluded()`, which r
 blocker it meets rather than looking for the nearest one.
 
 The full 1200×675 hero image at 400 samples per pixel takes 134 s.
-
-### Native against WebAssembly
-
-The same horizon map built natively and in Chrome: fractal terrain at 256×256 (130,050
-triangles), 160×160 analysis cells, 64 directions. Both cast exactly the same 9,310,408 rays,
-which also shows the two builds compute the same thing. Browser figures are the middle of three
-runs.
-
-| Build | 16 threads | 1 thread |
-| --- | --- | --- |
-| Native (g++ -O3) | 2.46 s | 15.89 s |
-| WebAssembly (Emscripten -O3, SIMD) | 4.63 s | 30.50 s |
-
-WebAssembly runs at about half native speed, and threads help both equally: 6.5× on 8 cores with
-hyper-threading. The two modules are about 180 KB each.
 
 ### Sun-hours: brute force against horizon maps
 
@@ -422,7 +422,7 @@ with `rt-cli analyze --method compare`, for increasingly fine samplings of the y
 
 Brute force casts one shadow ray per cell per sun position, so its cost is proportional to how
 finely the year is sampled: 3.5 billion rays for the last row. The horizon map instead measures
-each cell's skyline in 64 compass directions — 24 million rays, the same in every row — after which
+each cell's skyline in 64 compass directions (24 million rays, the same in every row), after which
 a sun position costs a table lookup: is the sun higher than the skyline beneath it? Only those
 lookups grow with the sampling, by about 2 seconds at the finest. The crossover sits around a
 thousand sun positions; below it, brute force is simply cheaper.
@@ -435,6 +435,21 @@ ridge have no skyline at all and cost one ray.
 
 The two methods agree to within 0.1% of the maximum on average in every row; the worst cells are
 the ones where a sharp peak's silhouette falls between two of the 64 sampled directions.
+
+### Native against WebAssembly
+
+The same horizon map built natively and in Chrome: fractal terrain at 256×256 (130,050
+triangles), 160×160 analysis cells, 64 directions. Both cast exactly the same 9,310,408 rays,
+which also shows the two builds compute the same thing. Browser figures are the middle of three
+runs.
+
+| Build | 16 threads | 1 thread |
+| --- | --- | --- |
+| Native (g++ -O3) | 2.46 s | 15.89 s |
+| WebAssembly (Emscripten -O3, SIMD) | 4.63 s | 30.50 s |
+
+WebAssembly runs at about half native speed, and threads help both equally: 6.5× on 8 cores with
+hyper-threading. The two modules are about 180 KB each.
 
 ### Spheres
 
@@ -455,28 +470,71 @@ Showcase scene (about 480 spheres) at 400×225 and 32 samples per pixel:
 
 The full 1200×675 image at 500 samples per pixel renders in about 80 seconds.
 
-Thread scaling flattens past 8 threads because the CPU has 8 physical cores; the extra 8 are hyper-threads sharing them.
+Thread scaling flattens past 8 threads because the CPU has 8 physical cores; the extra 8 are
+hyper-threads sharing them.
 
-Two changes prepare the code for threads without making a single thread faster. Each thread has its own random generator, because `std::rand` is not guaranteed to be thread-safe and can't be seeded per tile. Hit records hold a plain material pointer instead of a `shared_ptr`, because copying a `shared_ptr` updates an atomic reference count that every thread would hit on every ray intersection.
+Two changes prepare the code for threads without making a single thread faster. Each thread has
+its own random generator, because `std::rand` is not guaranteed to be thread-safe and can't be
+seeded per tile. Hit records hold a plain material pointer instead of a `shared_ptr`, because
+copying a `shared_ptr` updates an atomic reference count that every thread would hit on every ray
+intersection.
 
-## Roadmap
+## Building and testing
 
-The project is being built in milestones, each ending in something visible.
+### Tech stack
 
-| Milestone | Status | What it adds |
-| --- | --- | --- |
-| M0 Foundation | Done | Engine library, BVH, multithreaded tile renderer, PNG output, CMake, tests, CI |
-| M1 Fractal terrain | Done | Noise terrain, triangle meshes, directional sun and shadows, slope and height shading |
-| M2 Sun and visibility analysis | Done | Solar position, sun-hours, irradiance, horizon maps, viewsheds, maps and CSV |
-| M3 Real places | Done | Real elevation data from public terrain tiles for any place, with bundled Grand Canyon, Matterhorn and Mount Fuji |
-| M4 Browser app | Done | WebAssembly build in a Web Worker: orbit, drag the sun, generate worlds, load any place, click a point to see its viewshed |
-| M5 Showcase polish | Next | Architecture diagram, design decision records, more benchmarks |
+- **Engine and command line:** C++17, built with CMake
+- **Browser app:** the same C++ compiled to WebAssembly with Emscripten, and a TypeScript front end built with Vite
+- **Dependencies:** the C++ standard library, plus three vendored single-header libraries in [third_party/](third_party/): [stb_image](https://github.com/nothings/stb) and stb_image_write for PNG input and output, and [doctest](https://github.com/doctest/doctest) for unit tests. The front end's only packages are Vite and TypeScript
 
-## Project Structure
+### Prerequisites
+
+- A C++17 compiler such as `g++`, `clang++` or MSVC
+- CMake 3.20 or newer (Ninja recommended)
+- For the browser app only: the Emscripten SDK 4.0.10 and Node.js
+
+On Windows, MSYS2 provides the compiler, CMake and Ninja: install `mingw-w64-x86_64-gcc`,
+`mingw-w64-x86_64-cmake` and `mingw-w64-x86_64-ninja` with `pacman`, then put
+`C:\msys64\mingw64\bin` on your `PATH` before building.
+
+### Build
+
+```bash
+git clone https://github.com/Psybernetic7/ray-tracer.git
+cd ray-tracer
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+### Run the tests
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+The 51 test cases check, among other things, that:
+
+- the BVH finds exactly the hits a brute-force scan finds
+- renders are identical on any number of threads
+- rays can't slip between two triangles that share an edge
+- the sun's position matches known values: London's 62° midsummer noon sun, Sydney's winter sun
+  in the northern sky, and polar night
+- horizon-map sun-hours agree with brute force on fractal terrain
+- a viewshed is blocked by a ridge but sees a tall enough mast behind it
+- Terrarium decoding matches Everest's height to the encoding's 1/256 m
+- tile coordinates match the standard slippy-map tiles
+- stitched tiles have no seams, checked with a ramp that bilinear filtering must reproduce exactly
+- the browser app's session object renders progressively, picks the terrain under the cursor,
+  matches the engine's sun-hours and reuses its horizon map when only the latitude changes
+
+Two more tests render and analyse a bundled place end to end, offline. CI runs everything on
+Ubuntu and Windows for every push, and builds the browser app as well.
+
+## Project structure
 
 ```
 .
-├── engine/                 # Header-only core (no file or console I/O)
+├── engine/                 # Header-only core (no file, console or network I/O)
 │   ├── rtheader.h          # Common includes and usings
 │   ├── parallel.h          # parallel_for over a pool of threads
 │   ├── math/               # vec3, ray, interval, color, colormaps, constants, random generator
@@ -492,11 +550,25 @@ The project is being built in milestones, each ending in something visible.
 │   ├── src/                # Page, engine worker and their message protocol (TypeScript)
 │   └── public/             # Service worker for cross-origin isolation
 ├── data/places/            # Bundled elevation for the preset places (Terrarium PNGs)
-├── docs/                   # Reference renders and analysis maps
+├── docs/                   # Reference renders, analysis maps and screenshots
 ├── tests/                  # Unit tests (doctest)
 ├── third_party/            # Vendored single-header libraries
-└── CMakeLists.txt
+├── .github/workflows/      # CI (native build and tests) and the web app build and deploy
+└── CMakeLists.txt          # Native build, or the WebAssembly module under Emscripten
 ```
+
+## Roadmap
+
+The project is being built in milestones, each ending in something visible.
+
+| Milestone | Status | What it adds |
+| --- | --- | --- |
+| M0 Foundation | Done | Engine library, BVH, multithreaded tile renderer, PNG output, CMake, tests, CI |
+| M1 Fractal terrain | Done | Noise terrain, triangle meshes, directional sun and shadows, slope and height shading |
+| M2 Sun and visibility analysis | Done | Solar position, sun-hours, irradiance, horizon maps, viewsheds, maps and CSV |
+| M3 Real places | Done | Real elevation data from public terrain tiles for any place, with bundled Grand Canyon, Matterhorn and Mount Fuji |
+| M4 Browser app | Done | WebAssembly build in a Web Worker: orbit, drag the sun, generate worlds, load any place, click a point to see its viewshed |
+| M5 Showcase polish | Planned | Architecture diagram, design decision records, a hero animation, more benchmarks |
 
 ## Elevation data credits
 
