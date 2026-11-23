@@ -29,6 +29,48 @@ function(set_project_warnings target)
     endif()
 endfunction()
 
+# Browser build. Configured through Emscripten (emcmake), this builds only the WebAssembly
+# module for apps/web, in one of two flavours: multithreaded, which needs a cross-origin
+# isolated page for SharedArrayBuffer, and single-threaded, the fallback for every other page.
+if(EMSCRIPTEN)
+    option(RT_WEB_THREADS "Build the multithreaded WebAssembly module" ON)
+    set(RT_WEB_OUT "${CMAKE_SOURCE_DIR}/apps/web/public/wasm" CACHE PATH "Where the module is written")
+
+    add_executable(studio apps/web/native/bindings.cc)
+    target_include_directories(studio PRIVATE apps/web/native)
+    target_link_libraries(studio PRIVATE engine third_party)
+    set_project_warnings(studio)
+
+    set(web_flags -O3 -msimd128)
+    set(web_link_flags
+        -lembind
+        -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createStudio
+        -sENVIRONMENT=web,worker
+        -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=128MB -sMAXIMUM_MEMORY=4GB
+        -sSTACK_SIZE=2MB)
+    if(RT_WEB_THREADS)
+        list(APPEND web_flags -pthread)
+        # One worker per core is started with the module, so threads are ready before the
+        # first render: a thread that had to be started mid-render would deadlock it.
+        list(APPEND web_link_flags -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency
+                                   -sDEFAULT_PTHREAD_STACK_SIZE=1MB
+                                   # Growable shared memory makes JavaScript's view of it a little
+                                   # slower; nearly all the time is spent in WebAssembly anyway.
+                                   -Wno-pthreads-mem-growth)
+        set(web_name studio-mt)
+    else()
+        set(web_name studio-st)
+    endif()
+
+    target_compile_options(studio PRIVATE ${web_flags})
+    target_link_options(studio PRIVATE ${web_flags} ${web_link_flags})
+    set_target_properties(studio PROPERTIES
+        OUTPUT_NAME ${web_name}
+        SUFFIX ".js"
+        RUNTIME_OUTPUT_DIRECTORY ${RT_WEB_OUT})
+    return()
+endif()
+
 # Command-line renderer
 add_executable(rt-cli apps/cli/main.cc apps/cli/analyze.cc apps/cli/dem_source.cc apps/cli/image_io.cc)
 target_link_libraries(rt-cli PRIVATE engine third_party)
@@ -50,8 +92,10 @@ if(BUILD_TESTING)
         tests/test_render.cc
         tests/test_terrain.cc
         tests/test_analysis.cc
-        tests/test_dem.cc)
+        tests/test_dem.cc
+        tests/test_studio.cc)
     target_link_libraries(tests PRIVATE engine third_party)
+    target_include_directories(tests PRIVATE apps/web/native)
     set_project_warnings(tests)
     if(MINGW)
         target_link_options(tests PRIVATE -static)

@@ -4,12 +4,12 @@
 
 #include "analysis/analysis_grid.h"
 #include "analysis/horizon_map.h"
+#include "analysis/overlay.h"
 #include "analysis/scalar_map.h"
 #include "analysis/sun_hours.h"
 #include "analysis/viewshed.h"
 #include "geometry/bvh.h"
 #include "geometry/sphere.h"
-#include "math/colormap.h"
 #include "render/camera.h"
 #include "render/framebuffer.h"
 #include "render/renderer.h"
@@ -212,27 +212,8 @@ rgb8 to_byte_color(const color& c) {
     return rgb8{byte(c.x()), byte(c.y()), byte(c.z())};
 }
 
-const color viewshed_seen   = color(1.00, 0.62, 0.20);  // sRGB
-const color no_data         = color(0.35, 0.35, 0.35);
-
-// Turns a value into an sRGB colour for the chosen analysis.
-struct value_colors {
-    std::string mode;
-    bool irradiance = false;
-    interval range;
-
-    color operator()(double value) const {
-        if (mode == "viewshed")
-            return lerp_color(color(0.16, 0.17, 0.20), viewshed_seen, value);
-        const double t = range.size() > 0 ? (value - range.min) / range.size() : 0.5;
-        return irradiance ? inferno(t) : viridis(t);
-    }
-
-    static color lerp_color(const color& a, const color& b, double t) { return (1 - t)*a + t*b; }
-};
-
 // A top-down map, north up, one pixel per analysis cell, shaded with the terrain's relief.
-bool write_map(const analysis_grid& grid, const scalar_map& map, const value_colors& colors,
+bool write_map(const analysis_grid& grid, const scalar_map& map, const overlay_colors& colors,
                int marker_x, int marker_y, const std::string& path, std::string& error) {
     std::vector<rgb8> pixels;
     pixels.reserve(size_t(map.width()) * size_t(map.height()));
@@ -243,7 +224,7 @@ bool write_map(const analysis_grid& grid, const scalar_map& map, const value_col
     for (int y = 0; y < map.height(); y++) {
         for (int x = 0; x < map.width(); x++) {
             const double value = map.at(x, y);
-            color c = std::isnan(value) ? no_data : colors(value);
+            color c = std::isnan(value) ? no_data_color : colors(value);
             if (grid.valid(x, y))
                 c = c * hillshade(grid.normal(x, y));
             if (std::abs(x - marker_x) <= marker_radius && std::abs(y - marker_y) <= marker_radius)
@@ -416,7 +397,10 @@ int run_analyze(int argc, char* argv[]) {
     // Flat map and CSV.
     const std::string stem = stem_of(opts.output);
     const std::string map_path = stem + "-map.png", csv_path = stem + ".csv";
-    value_colors colors{opts.mode, irradiance, result.range()};
+    const overlay_kind kind = opts.mode == "viewshed" ? overlay_kind::viewshed
+                            : irradiance               ? overlay_kind::irradiance
+                                                       : overlay_kind::sun_hours;
+    const overlay_colors colors{kind, result.range()};
 
     if (!write_map(grid, result, colors, marker_x, marker_y, map_path, error)) {
         std::cerr << error << "\n";
@@ -435,16 +419,8 @@ int run_analyze(int argc, char* argv[]) {
 
     // 3D render with the result painted onto the terrain.
     const bool is_viewshed = opts.mode == "viewshed";
-    model.material->overlay = [&result, &colors, is_viewshed](double u, double v, const color& base) {
-        const double value = result.sample(u, v);
-        if (std::isnan(value))
-            return base;
-        if (is_viewshed) {
-            // Keep the terrain's own colours, warmed where visible and darkened where hidden.
-            const color seen = 0.4*base + 0.6*srgb_to_linear(viewshed_seen);
-            return (1 - value)*(0.35*base) + value*seen;
-        }
-        return srgb_to_linear(colors(value));
+    model.material->overlay = [&result, &colors](double u, double v, const color& base) {
+        return overlay_albedo(colors, result.sample(u, v), base);
     };
 
     camera cam;

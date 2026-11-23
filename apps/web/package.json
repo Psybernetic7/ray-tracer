@@ -1,0 +1,19 @@
+{
+  "name": "terrain-sun-studio",
+  "private": true,
+  "version": "0.4.0",
+  "description": "Browser front end for the ray tracer: the C++ engine compiled to WebAssembly",
+  "type": "module",
+  "scripts": {
+    "wasm": "node scripts/build-wasm.mjs",
+    "predev": "node scripts/copy-places.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-places.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vite": "7.3.7"
+  }
+}

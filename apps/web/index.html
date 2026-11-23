@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Terrain &amp; Sun Studio</title>
+    <meta name="description" content="A C++ ray tracer compiled to WebAssembly: generate or load real terrain, light it with the real sun, and map sun-hours, solar energy and what can be seen from any point." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='22' cy='10' r='5' fill='%23f5b041'/%3E%3Cpath d='M1 28 11 13l6 8 4-5 10 12z' fill='%235d8aa8'/%3E%3C/svg%3E" />
+    <!-- Lets GitHub Pages, which can't send custom headers, unlock threads (see the file). -->
+    <script src="./coi-serviceworker.js"></script>
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <div class="app">
+      <main class="stage" id="stage">
+        <canvas id="view" aria-label="Rendered terrain. Drag to orbit, scroll to zoom."></canvas>
+
+        <div class="chip chip-title">
+          <strong id="place-label">Terrain &amp; Sun Studio</strong>
+          <span id="place-detail"></span>
+        </div>
+
+        <div class="chip chip-status" id="status" role="status" aria-live="polite">
+          <span class="spinner" id="spinner" aria-hidden="true"></span>
+          <span id="status-text">Starting…</span>
+        </div>
+
+        <div class="chip chip-readout" id="readout" hidden></div>
+
+        <div class="legend" id="legend" hidden>
+          <div class="legend-title" id="legend-title"></div>
+          <div class="legend-bar" id="legend-bar"></div>
+          <div class="legend-labels"><span id="legend-min"></span><span id="legend-max"></span></div>
+          <div class="legend-note" id="legend-note"></div>
+        </div>
+
+        <div class="hint" id="hint">Drag to orbit · scroll to zoom</div>
+      </main>
+
+      <aside class="panel">
+        <header class="panel-head">
+          <h1>Terrain &amp; Sun Studio</h1>
+          <p>A C++ ray tracer running in your browser. Every pixel and every map is traced on your own CPU.</p>
+        </header>
+
+        <section class="group" aria-labelledby="terrain-h">
+          <h2 id="terrain-h">Terrain</h2>
+          <label class="field">
+            <span>Source</span>
+            <select id="source">
+              <option value="fractal">Fractal mountains</option>
+              <option value="anywhere">Anywhere on Earth…</option>
+            </select>
+          </label>
+
+          <div id="fractal-controls" class="stack">
+            <div class="field">
+              <span>Seed</span>
+              <div class="row">
+                <input id="seed" type="number" min="0" max="999999" step="1" value="1" />
+                <button id="reseed" type="button" class="btn">New world</button>
+              </div>
+            </div>
+            <label class="field slider">
+              <span>Ridges <output id="ridge-out"></output></span>
+              <input id="ridge" type="range" min="0" max="1" step="0.01" value="0.78" />
+            </label>
+            <label class="field slider">
+              <span>Erosion warp <output id="warp-out"></output></span>
+              <input id="warp" type="range" min="0" max="1" step="0.01" value="0.35" />
+            </label>
+            <label class="field slider">
+              <span>Peak height <output id="height-out"></output></span>
+              <input id="height" type="range" min="1" max="5" step="0.1" value="3.2" />
+            </label>
+          </div>
+
+          <div id="anywhere-controls" class="stack" hidden>
+            <div class="row two">
+              <label class="field"><span>Latitude</span><input id="lat" type="number" min="-80" max="80" step="0.0001" value="27.9881" /></label>
+              <label class="field"><span>Longitude</span><input id="lon" type="number" min="-180" max="180" step="0.0001" value="86.9250" /></label>
+            </div>
+            <label class="field slider">
+              <span>Area <output id="extent-out"></output></span>
+              <input id="extent" type="range" min="2" max="40" step="1" value="20" />
+            </label>
+            <button id="load-region" type="button" class="btn primary">Load this area</button>
+            <div class="presets" id="region-presets" aria-label="Example places"></div>
+          </div>
+
+          <label class="field">
+            <span>Detail</span>
+            <select id="resolution">
+              <option value="128">Low · 32 k triangles</option>
+              <option value="256" selected>Medium · 130 k triangles</option>
+              <option value="512">High · 520 k triangles</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="group" aria-labelledby="mode-h">
+          <h2 id="mode-h">Show</h2>
+          <div class="segmented" role="radiogroup" aria-labelledby="mode-h" id="modes">
+            <button type="button" role="radio" data-mode="render" aria-checked="true">Light</button>
+            <button type="button" role="radio" data-mode="sun-hours" aria-checked="false">Sun-hours</button>
+            <button type="button" role="radio" data-mode="irradiance" aria-checked="false">Solar energy</button>
+            <button type="button" role="radio" data-mode="viewshed" aria-checked="false">Viewshed</button>
+          </div>
+          <p class="note" id="mode-note"></p>
+
+          <div id="sun-controls" class="stack">
+            <label class="field slider">
+              <span>Date <output id="day-out"></output></span>
+              <input id="day" type="range" min="1" max="365" step="1" value="172" />
+            </label>
+            <div class="field slider">
+              <label for="hour"><span>Time <output id="hour-out"></output></span></label>
+              <div class="row">
+                <input id="hour" type="range" min="0" max="24" step="0.05" value="15.5" />
+                <button id="play" type="button" class="btn icon" aria-label="Play the day">▶</button>
+              </div>
+            </div>
+            <p class="note" id="sun-out"></p>
+          </div>
+
+          <label class="field slider" id="latitude-field">
+            <span>Latitude <output id="latitude-out"></output></span>
+            <input id="latitude" type="range" min="-70" max="70" step="0.5" value="46.5" />
+          </label>
+
+          <div id="viewshed-controls" class="stack" hidden>
+            <label class="field slider">
+              <span>Observer height <output id="eye-out"></output></span>
+              <input id="eye" type="range" min="0" max="100" step="1" value="0" />
+            </label>
+          </div>
+
+          <label class="field" id="grid-field" hidden>
+            <span>Analysis cells</span>
+            <select id="grid">
+              <option value="96">96 × 96 · fastest</option>
+              <option value="160" selected>160 × 160</option>
+              <option value="256">256 × 256 · finest</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="group" aria-labelledby="view-h">
+          <h2 id="view-h">View</h2>
+          <label class="field">
+            <span>Render quality</span>
+            <select id="quality">
+              <option value="0.5">Fast · half resolution</option>
+              <option value="0.75" selected>Balanced</option>
+              <option value="1">Sharp · full resolution</option>
+            </select>
+          </label>
+          <div class="row">
+            <button id="reset-view" type="button" class="btn">Reset camera</button>
+            <button id="save" type="button" class="btn">Save image</button>
+          </div>
+        </section>
+
+        <details class="group stats">
+          <summary>Under the hood</summary>
+          <dl id="stats"></dl>
+        </details>
+
+        <footer class="panel-foot">
+          <p id="attribution" hidden>Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> (Mapzen/Tilezen) from USGS 3DEP, SRTM, GMTED2010, EU-DEM, ETOPO1 and others.</p>
+          <p><a href="https://github.com/Psybernetic7/ray-tracer" target="_blank" rel="noopener">Source on GitHub</a> · C++17 → WebAssembly</p>
+        </footer>
+      </aside>
+    </div>
+  </body>
+</html>

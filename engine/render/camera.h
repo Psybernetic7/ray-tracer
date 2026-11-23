@@ -79,6 +79,14 @@ class camera {
         return ray(ray_origin, ray_direction);
     }
 
+    // The ray through a point of the image, with no antialiasing jitter or defocus: x and y are
+    // continuous pixel coordinates, from 0,0 at the top-left corner to width,height at the
+    // bottom-right. Answers "what is under the mouse?" for an interactive view.
+    ray center_ray(double x, double y) const {
+        const point3 target = pixel00_loc + (x - 0.5) * pixel_delta_u + (y - 0.5) * pixel_delta_v;
+        return ray(center, target - center);
+    }
+
     color ray_color(const ray& r, int depth, const hittable& world) const {
         if (depth <= 0)
             return color(0,0,0);
